@@ -2,20 +2,42 @@ import { notFound } from 'next/navigation';
 
 export const dynamic = 'force-dynamic';
 
+import dbConnect from '@/lib/db';
+import Paste from '@/models/Paste';
+
 async function getPaste(id) {
-    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000';
+    await dbConnect();
 
-    // NOTE: Calling own API in SC (Server Component) is generally not recommended 
-    // for performance (extra hop), but satisfies requirements.
-    const res = await fetch(`${baseUrl}/api/pastes/${id}`, {
-        cache: 'no-store',
-    });
+    try {
+        const paste = await Paste.findById(id);
 
-    if (!res.ok) {
+        if (!paste) return null;
+
+        // Check if expired by time
+        if (paste.expiresAt && new Date() > new Date(paste.expiresAt)) {
+            return null;
+        }
+
+        // Check if expired by views
+        if (paste.maxViews && paste.currentViews >= paste.maxViews) {
+            return null;
+        }
+
+        // Increment view count
+        // Note: In strict React Server Components, mutations like this in GET are sometimes discouraged, 
+        // but for this simple app it ensures the link works exactly like the API.
+        paste.currentViews += 1;
+        await paste.save();
+
+        // Convert to plain object to pass to component
+        return {
+            content: paste.content,
+            current_views: paste.currentViews
+        };
+    } catch (error) {
+        console.error("Error fetching paste:", error);
         return null;
     }
-
-    return res.json();
 }
 
 export default async function PastePage({ params }) {
